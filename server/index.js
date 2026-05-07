@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const rateLimit = require('express-rate-limit');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const admin = require('firebase-admin');
 const bodyParser = require('body-parser');
@@ -38,6 +39,19 @@ app.use((req, res, next) => {
     bodyParser.json()(req, res, next);
   }
 });
+
+// Basic rate limiter: moderate defaults. Adjust in production.
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // limit each IP to 100 requests per windowMs
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Apply rate limiter to sensitive endpoints
+app.use('/me', apiLimiter);
+app.use('/create-customer', apiLimiter);
+app.use('/create-payment-intent', apiLimiter);
 
 // Simple product catalog for server-side price lookup (unitPrice in cents)
 const productCatalog = {

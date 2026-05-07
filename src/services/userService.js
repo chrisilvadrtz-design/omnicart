@@ -1,26 +1,38 @@
-// src/services/userService.js
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import EncryptedStorage from 'react-native-encrypted-storage';
 
 const API_BASE = process.env.REACT_APP_API_URL || 'http://localhost:3000';
 
 export const getStoredStripeCustomerId = async () => {
   try {
-    return await AsyncStorage.getItem('stripeCustomerId');
+    const val = await EncryptedStorage.getItem('stripeCustomerId');
+    return val;
   } catch (e) {
-    console.warn('Error reading stripeCustomerId from storage', e);
+    console.warn('Error reading stripeCustomerId from secure storage', e);
     return null;
   }
 };
 
 export const setStoredStripeCustomerId = async (id) => {
   try {
-    if (id) await AsyncStorage.setItem('stripeCustomerId', id);
+    if (id) {
+      await EncryptedStorage.setItem('stripeCustomerId', id);
+    } else {
+      await EncryptedStorage.removeItem('stripeCustomerId');
+    }
   } catch (e) {
-    console.warn('Error writing stripeCustomerId to storage', e);
+    console.warn('Error writing stripeCustomerId to secure storage', e);
   }
 };
 
-// Fetch /me from backend using Firebase ID token (Bearer)
+export const clearStoredStripeCustomerId = async () => {
+  try {
+    await EncryptedStorage.removeItem('stripeCustomerId');
+  } catch (e) {
+    console.warn('Error clearing stripeCustomerId from secure storage', e);
+  }
+};
+
+// Fetch /me from backend using Firebase ID token (Bearer) and persist the returned stripeCustomerId
 export const fetchMeAndPersist = async (idToken) => {
   try {
     if (!idToken) return null;
@@ -52,5 +64,6 @@ export const fetchMeAndPersist = async (idToken) => {
 export default {
   getStoredStripeCustomerId,
   setStoredStripeCustomerId,
+  clearStoredStripeCustomerId,
   fetchMeAndPersist,
 };
