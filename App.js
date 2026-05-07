@@ -1,8 +1,13 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
 import { Ionicons } from '@expo/vector-icons';
+
+// Firebase init & auth
+import { initFirebase, getFirebaseAuth } from './src/services/firebase';
+import { onAuthStateChanged } from 'firebase/auth';
+import userService from './src/services/userService';
 
 // Screens
 import HomeScreen from './src/screens/HomeScreen';
@@ -52,6 +57,30 @@ function Tabs() {
 }
 
 export default function App() {
+  useEffect(() => {
+    // Initialize Firebase (client SDK) and wire auth state to persist stripeCustomerId
+    try {
+      initFirebase();
+      const auth = getFirebaseAuth();
+
+      const unsubscribe = onAuthStateChanged(auth, async (user) => {
+        if (user) {
+          try {
+            const idToken = await user.getIdToken(/* forceRefresh */ true);
+            await userService.fetchMeAndPersist(idToken);
+            console.log('Fetched /me and persisted stripeCustomerId (if present)');
+          } catch (e) {
+            console.warn('Error fetching /me after auth change', e.message || e);
+          }
+        }
+      });
+
+      return () => unsubscribe();
+    } catch (e) {
+      console.warn('Firebase init or auth watcher failed', e.message || e);
+    }
+  }, []);
+
   return (
     <NavigationContainer>
       <Stack.Navigator>
