@@ -17,7 +17,12 @@ npm install
 npm start
 
 Endpoints:
+- GET  /products
+  - Returns product catalog: { products: [{ id, name, unitPrice, image }, ...] }
 - POST /create-customer { email, name, userId }
+  - Creates a Stripe Customer and persists stripeCustomerId to users/{userId} (if userId provided)
+- GET  /user/:userId
+  - Returns the user document from Firestore (including stripeCustomerId when present)
 - POST /create-payment-intent { amount (cents), currency (optional), paymentMethodId (optional), customerId (optional), items: [{id, quantity}], storeId }
   - Server computes unit prices using a product catalog and validates amount equals computed total
 - POST /create-setup-intent { customerId (optional) }
@@ -28,5 +33,5 @@ Endpoints:
 
 Security & notes:
 - Keep STRIPE_SECRET_KEY and Firebase credentials server-side only. Do not commit to the repo.
-- The product catalog in server/index.js is a mock. In production replace with real store API price lookups.
+- The product catalog in server/index.js is a mock. In production replace with real store API price lookups or a products DB.
 - Use HTTPS for webhook endpoint and protect with STRIPE_WEBHOOK_SECRET.

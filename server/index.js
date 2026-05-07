@@ -114,6 +114,23 @@ app.post('/create-customer', async (req, res) => {
   }
 });
 
+// GET /user/:userId - returns user document (including stripeCustomerId if present)
+app.get('/user/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    if (!userId) return res.status(400).json({ error: 'Missing userId' });
+
+    const userDoc = await db.collection('users').doc(userId).get();
+    if (!userDoc.exists) return res.status(404).json({ error: 'User not found' });
+
+    const data = userDoc.data();
+    res.json({ user: data });
+  } catch (err) {
+    console.error('get-user error', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Create PaymentIntent with server-side validation of items via productCatalog
 app.post('/create-payment-intent', async (req, res) => {
   try {
