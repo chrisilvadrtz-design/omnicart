@@ -114,19 +114,33 @@ app.post('/create-customer', async (req, res) => {
   }
 });
 
-// GET /user/:userId - returns user document (including stripeCustomerId if present)
-app.get('/user/:userId', async (req, res) => {
+// GET /me - returns the authenticated user's Firestore doc; requires Authorization: Bearer <Firebase ID token>
+app.get('/me', async (req, res) => {
   try {
-    const { userId } = req.params;
-    if (!userId) return res.status(400).json({ error: 'Missing userId' });
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+    if (!token) return res.status(401).json({ error: 'Missing authorization token' });
 
-    const userDoc = await db.collection('users').doc(userId).get();
-    if (!userDoc.exists) return res.status(404).json({ error: 'User not found' });
+    // Verify Firebase ID token
+    let decoded;
+    try {
+      decoded = await admin.auth().verifyIdToken(token);
+    } catch (verifyErr) {
+      console.error('verifyIdToken error', verifyErr.message);
+      return res.status(401).json({ error: 'Invalid or expired token' });
+    }
+
+    const uid = decoded.uid;
+    const userDoc = await db.collection('users').doc(uid).get();
+    if (!userDoc.exists) {
+      // Optionally create a minimal user doc
+      return res.status(404).json({ error: 'User not found' });
+    }
 
     const data = userDoc.data();
-    res.json({ user: data });
+    res.json({ user: { id: uid, ...data } });
   } catch (err) {
-    console.error('get-user error', err);
+    console.error('get /me error', err);
     res.status(500).json({ error: err.message });
   }
 });
