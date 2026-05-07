@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const admin = require('firebase-admin');
+const bodyParser = require('body-parser');
 
 // Initialize Firebase Admin
 const initFirebase = () => {
@@ -29,14 +30,31 @@ const db = admin.firestore();
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+// We need raw body for Stripe signature verification on webhook
+app.use((req, res, next) => {
+  if (req.originalUrl === '/webhook') {
+    bodyParser.raw({ type: 'application/json' })(req, res, next);
+  } else {
+    bodyParser.json()(req, res, next);
+  }
+});
 
-// Utility: compute total from items array
-// items expected: [{ id, name, unitPrice (cents), quantity }]
+// Simple product catalog for server-side price lookup (unitPrice in cents)
+const productCatalog = {
+  milk_1l: { id: 'milk_1l', name: 'Organic Milk 1L', unitPrice: 399 },
+  bread_ww: { id: 'bread_ww', name: 'Whole Wheat Bread', unitPrice: 249 },
+  eggs_12: { id: 'eggs_12', name: 'Free Range Eggs (12)', unitPrice: 499 },
+  apple: { id: 'apple', name: 'Apple', unitPrice: 99 },
+  chicken_1kg: { id: 'chicken_1kg', name: 'Chicken 1kg', unitPrice: 799 },
+};
+
+// Utility: compute total from items array using productCatalog
+// items expected: [{ id: productId, quantity }]
 const computeItemsTotal = (items = []) => {
   if (!Array.isArray(items)) return 0;
   return items.reduce((sum, it) => {
-    const unit = Number(it.unitPrice) || 0; // expected in cents
+    const product = productCatalog[it.id];
+    const unit = product ? Number(product.unitPrice) : 0; // cents
     const qty = Number(it.quantity) || 0;
     return sum + unit * qty;
   }, 0);
@@ -71,21 +89,19 @@ app.post('/create-customer', async (req, res) => {
   }
 });
 
-// Create PaymentIntent with server-side validation of items
+// Create PaymentIntent with server-side validation of items via productCatalog
 app.post('/create-payment-intent', async (req, res) => {
   try {
-    const { amount, currency = 'usd', paymentMethodId, customerId, items } = req.body;
+    const { amount, currency = 'usd', paymentMethodId, customerId, items, storeId } = req.body;
 
-    if (!amount || amount <= 0) return res.status(400).json({ error: 'Invalid amount' });
-
-    // Server-side validation: compute expected total from items (in cents)
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'Items are required for server-side validation' });
     }
 
+    // Server-side validation: compute expected total from product catalog (in cents)
     const computedTotal = computeItemsTotal(items);
 
-    if (computedTotal !== Number(amount)) {
+    if (!amount || Number(amount) !== computedTotal) {
       return res.status(400).json({ error: 'Amount mismatch', details: { computedTotal, providedAmount: amount } });
     }
 
@@ -155,6 +171,74 @@ app.get('/saved-payment-methods', async (req, res) => {
     console.error('saved-payment-methods error', err);
     res.status(500).json({ error: err.message });
   }
+});
+
+// Stripe webhook endpoint to update order statuses
+app.post('/webhook', async (req, res) => {
+  const sig = req.headers['stripe-signature'];
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+  let event;
+
+  try {
+    if (webhookSecret) {
+      event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
+    } else {
+      // If no webhook signing secret provided, try to parse the body (unsafe for production)
+      event = req.body;
+    }
+  } catch (err) {
+    console.error('Webhook signature verification failed:', err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  // Handle the event
+  switch (event.type) {
+    case 'payment_intent.succeeded': {
+      const intent = event.data.object;
+      const paymentIntentId = intent.id;
+      console.log('PaymentIntent was successful:', paymentIntentId);
+
+      // Update Firestore order with this paymentIntentId
+      try {
+        const ordersRef = db.collection('orders');
+        const snapshot = await ordersRef.where('paymentIntentId', '==', paymentIntentId).get();
+        if (!snapshot.empty) {
+          snapshot.forEach(doc => {
+            doc.ref.update({ paymentStatus: 'succeeded', updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+          });
+        }
+      } catch (e) {
+        console.error('Error updating order status on success webhook:', e.message);
+      }
+
+      break;
+    }
+    case 'payment_intent.payment_failed': {
+      const intent = event.data.object;
+      const paymentIntentId = intent.id;
+      console.log('PaymentIntent failed:', paymentIntentId);
+
+      try {
+        const ordersRef = db.collection('orders');
+        const snapshot = await ordersRef.where('paymentIntentId', '==', paymentIntentId).get();
+        if (!snapshot.empty) {
+          snapshot.forEach(doc => {
+            doc.ref.update({ paymentStatus: 'failed', updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+          });
+        }
+      } catch (e) {
+        console.error('Error updating order status on failed webhook:', e.message);
+      }
+
+      break;
+    }
+    default:
+      console.log(`Unhandled event type ${event.type}`);
+  }
+
+  // Return a response to acknowledge receipt of the event
+  res.json({ received: true });
 });
 
 // Record order in Firestore

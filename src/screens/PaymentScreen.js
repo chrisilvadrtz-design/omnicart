@@ -4,6 +4,7 @@ import { CardField, useStripe } from '@stripe/stripe-react-native';
 import { initializeStripe } from '../services/paymentService';
 
 export default function PaymentScreen({ route, navigation }) {
+  const items = route?.params?.items || [];
   const total = route?.params?.total ?? 0.0;
   const user = route?.params?.user || { id: null, email: 'user@example.com', customerId: null };
 
@@ -32,11 +33,11 @@ export default function PaymentScreen({ route, navigation }) {
     }
   };
 
-  const fetchPaymentIntentClientSecret = async (amount, paymentMethodId, customerId) => {
+  const fetchPaymentIntentClientSecret = async (itemsForServer, paymentMethodId, customerId) => {
     const resp = await fetch(`${apiBase}/create-payment-intent`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ amount: Math.round(amount * 100), paymentMethodId, customerId }),
+      body: JSON.stringify({ items: itemsForServer, paymentMethodId, customerId }),
     });
     return resp.json();
   };
@@ -66,7 +67,7 @@ export default function PaymentScreen({ route, navigation }) {
     setLoading(true);
     try {
       // Create a PaymentIntent server-side using saved payment method and customer
-      const res = await fetchPaymentIntentClientSecret(total, methodId, user.customerId);
+      const res = await fetchPaymentIntentClientSecret(items, methodId, user.customerId);
       const { clientSecret, paymentIntentId, error: serverError } = res;
       if (serverError) throw new Error(serverError);
 
@@ -82,7 +83,7 @@ export default function PaymentScreen({ route, navigation }) {
       await fetch(`${apiBase}/record-order`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user.id, items: route?.params?.items || [], total, storeId: route?.params?.storeId || null, paymentIntentId: paymentIntent?.id || paymentIntentId, paymentStatus: paymentIntent?.status || 'succeeded' }),
+        body: JSON.stringify({ userId: user.id, items, total, storeId: route?.params?.storeId || null, paymentIntentId: paymentIntent?.id || paymentIntentId, paymentStatus: paymentIntent?.status || 'succeeded' }),
       });
 
       navigation.replace('PaymentSuccess', { orderId: paymentIntent?.id || paymentIntentId, total });
@@ -124,12 +125,12 @@ export default function PaymentScreen({ route, navigation }) {
         }
       }
 
-      // If not saving or after saving, create payment intent
-      const res = await fetchPaymentIntentClientSecret(total, paymentMethodId, user.customerId);
+      // Create payment intent (server will compute totals based on items and product catalog)
+      const res = await fetchPaymentIntentClientSecret(items, paymentMethodId, user.customerId);
       const { clientSecret, paymentIntentId, error: serverError } = res;
       if (serverError) throw new Error(serverError);
 
-      // If we have a paymentMethodId (saved or from setup), confirm using it; otherwise confirm with card details
+      // Confirm payment with card details (if not using a saved method)
       let confirmResult;
 
       if (paymentMethodId) {
@@ -153,7 +154,7 @@ export default function PaymentScreen({ route, navigation }) {
       await fetch(`${apiBase}/record-order`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user.id, items: route?.params?.items || [], total, storeId: route?.params?.storeId || null, paymentIntentId: paymentIntent?.id || paymentIntentId, paymentStatus: paymentIntent?.status || 'succeeded' }),
+        body: JSON.stringify({ userId: user.id, items, total, storeId: route?.params?.storeId || null, paymentIntentId: paymentIntent?.id || paymentIntentId, paymentStatus: paymentIntent?.status || 'succeeded' }),
       });
 
       // Navigate to success
