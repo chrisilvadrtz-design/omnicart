@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -13,15 +13,41 @@ export default function CartScreen({ navigation }) {
   // Note: productId values should match server product catalog keys
   const [user, setUser] = useState({ id: 'user_123', email: 'user@example.com', name: 'John Doe', customerId: null });
 
+  // cart stores productId and quantity only; product metadata (name, price) comes from server /products
   const [cartItems, setCartItems] = useState([
-    { id: '1', productId: 'milk_1l', name: 'Organic Milk', price: 399, quantity: 2 },
-    { id: '2', productId: 'bread_ww', name: 'Whole Wheat Bread', price: 249, quantity: 1 },
-    { id: '3', productId: 'eggs_12', name: 'Free Range Eggs', price: 499, quantity: 1 },
+    { id: '1', productId: 'milk_1l', quantity: 2 },
+    { id: '2', productId: 'bread_ww', quantity: 1 },
+    { id: '3', productId: 'eggs_12', quantity: 1 },
   ]);
+
+  const [products, setProducts] = useState({}); // map productId -> product data
+
+  useEffect(() => {
+    fetchProducts();
+  }, []);
+
+  const fetchProducts = async () => {
+    const apiBase = process.env.REACT_APP_API_URL || 'http://localhost:3000';
+    try {
+      const resp = await fetch(`${apiBase}/products`);
+      const data = await resp.json();
+      if (data?.products) {
+        const map = {};
+        data.products.forEach(p => { map[p.id] = p; });
+        setProducts(map);
+      }
+    } catch (e) {
+      console.warn('Could not fetch products, using defaults', e.message || e);
+    }
+  };
 
   const calculateTotal = () => {
     return (
-      cartItems.reduce((total, item) => total + (item.price * item.quantity) / 100, 0)
+      cartItems.reduce((total, item) => {
+        const p = products[item.productId];
+        const price = p ? p.unitPrice : 0; // in cents
+        return total + (price * item.quantity) / 100;
+      }, 0)
     ).toFixed(2);
   };
 
@@ -65,24 +91,27 @@ export default function CartScreen({ navigation }) {
     navigation.navigate('Payment', { items: itemsForServer, total: parseFloat(calculateTotal()), user: updatedUser, storeId: 'freshmart' });
   };
 
-  const renderCartItem = ({ item }) => (
-    <View style={styles.cartItem}>
-      <View style={styles.itemInfo}>
-        <Text style={styles.itemName}>{item.name}</Text>
-        <Text style={styles.itemPrice}>${(item.price / 100).toFixed(2)}</Text>
+  const renderCartItem = ({ item }) => {
+    const p = products[item.productId];
+    return (
+      <View style={styles.cartItem}>
+        <View style={styles.itemInfo}>
+          <Text style={styles.itemName}>{p ? p.name : item.productId}</Text>
+          <Text style={styles.itemPrice}>${p ? (p.unitPrice / 100).toFixed(2) : '0.00'}</Text>
+        </View>
+        <View style={styles.quantityControl}>
+          <TouchableOpacity onPress={() => updateQuantity(item.id, item.quantity - 1)}>
+            <Ionicons name="remove-circle" size={24} color="#007AFF" />
+          </TouchableOpacity>
+          <Text style={styles.quantityText}>{item.quantity}</Text>
+          <TouchableOpacity onPress={() => updateQuantity(item.id, item.quantity + 1)}>
+            <Ionicons name="add-circle" size={24} color="#007AFF" />
+          </TouchableOpacity>
+        </View>
+        <Text style={styles.itemTotal}>${p ? ((p.unitPrice * item.quantity) / 100).toFixed(2) : '0.00'}</Text>
       </View>
-      <View style={styles.quantityControl}>
-        <TouchableOpacity onPress={() => updateQuantity(item.id, item.quantity - 1)}>
-          <Ionicons name="remove-circle" size={24} color="#007AFF" />
-        </TouchableOpacity>
-        <Text style={styles.quantityText}>{item.quantity}</Text>
-        <TouchableOpacity onPress={() => updateQuantity(item.id, item.quantity + 1)}>
-          <Ionicons name="add-circle" size={24} color="#007AFF" />
-        </TouchableOpacity>
-      </View>
-      <Text style={styles.itemTotal}>${((item.price * item.quantity) / 100).toFixed(2)}</Text>
-    </View>
-  );
+    );
+  };
 
   return (
     <View style={styles.container}>

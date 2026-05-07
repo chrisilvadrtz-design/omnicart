@@ -41,11 +41,11 @@ app.use((req, res, next) => {
 
 // Simple product catalog for server-side price lookup (unitPrice in cents)
 const productCatalog = {
-  milk_1l: { id: 'milk_1l', name: 'Organic Milk 1L', unitPrice: 399 },
-  bread_ww: { id: 'bread_ww', name: 'Whole Wheat Bread', unitPrice: 249 },
-  eggs_12: { id: 'eggs_12', name: 'Free Range Eggs (12)', unitPrice: 499 },
-  apple: { id: 'apple', name: 'Apple', unitPrice: 99 },
-  chicken_1kg: { id: 'chicken_1kg', name: 'Chicken 1kg', unitPrice: 799 },
+  milk_1l: { id: 'milk_1l', name: 'Organic Milk 1L', unitPrice: 399, image: '/images/milk.png' },
+  bread_ww: { id: 'bread_ww', name: 'Whole Wheat Bread', unitPrice: 249, image: '/images/bread.png' },
+  eggs_12: { id: 'eggs_12', name: 'Free Range Eggs (12)', unitPrice: 499, image: '/images/eggs.png' },
+  apple: { id: 'apple', name: 'Apple', unitPrice: 99, image: '/images/apple.png' },
+  chicken_1kg: { id: 'chicken_1kg', name: 'Chicken 1kg', unitPrice: 799, image: '/images/chicken.png' },
 };
 
 // Utility: compute total from items array using productCatalog
@@ -60,6 +60,17 @@ const computeItemsTotal = (items = []) => {
   }, 0);
 };
 
+// GET /products - returns product catalog (array)
+app.get('/products', (req, res) => {
+  try {
+    const products = Object.values(productCatalog).map(p => ({ id: p.id, name: p.name, unitPrice: p.unitPrice, image: p.image }));
+    res.json({ products });
+  } catch (err) {
+    console.error('products error', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Create Stripe Customer and store mapping in Firestore
 app.post('/create-customer', async (req, res) => {
   try {
@@ -69,7 +80,7 @@ app.post('/create-customer', async (req, res) => {
     // Create customer in Stripe
     const customer = await stripe.customers.create({ email, name });
 
-    // Store mapping in Firestore (optional)
+    // Store mapping in Firestore (customers collection)
     try {
       await db.collection('customers').doc(customer.id).set({
         stripeCustomerId: customer.id,
@@ -79,7 +90,21 @@ app.post('/create-customer', async (req, res) => {
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
     } catch (fireErr) {
-      console.warn('Could not write customer mapping to Firestore:', fireErr.message);
+      console.warn('Could not write customer mapping to Firestore (customers):', fireErr.message);
+    }
+
+    // Also persist stripeCustomerId on user's Firestore document if userId provided
+    if (userId) {
+      try {
+        await db.collection('users').doc(userId).set({
+          stripeCustomerId: customer.id,
+          email: email,
+          name: name || null,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+      } catch (userErr) {
+        console.warn('Could not write stripeCustomerId to users collection:', userErr.message);
+      }
     }
 
     res.json({ customerId: customer.id });
